@@ -17,6 +17,22 @@ species <- regmatches(raster.list, regexpr("(?<=binary_)[A-Z]{4}", raster.list, 
 gb <- rast(raster.list) 
 names(gb) <- species
 
+#first create a raster for all species that is not cropped
+gb.all.full <- any(gb, na.rm = T)
+#changes 0s to NA
+gb.all.full[gb.all.full == 0] <- NA
+#export
+writeRaster(gb.all.full, "Output/grassBirdsPA_All_full.tif")
+
+#The above shows too much habitat. Try just the Fab 4
+gb.fab4 <- gb[[names(gb) %in% c("BAIS", "CCLO", "SPPI", "TBLO")]]
+#first create a raster for all species that is not cropped
+gb.fab4.full <- any(gb.fab4, na.rm = T)
+#changes 0s to NA
+gb.fab4.full[gb.fab4.full == 0] <- NA
+#export
+writeRaster(gb.fab4.full, "Output/grassBirdsPA_Fab4_full.tif", overwrite = T)
+
 #waterfowl target landscapes
 wf <- read_sf("Data/Waterfowl_TL/TargetLandscapes_2026_Final.shp") |>
   st_transform(crs = crs(gb))
@@ -52,3 +68,11 @@ wf.gb <- wf.gb |>
 plot(wf.gb |> select(area.all))
 
 st_write(wf.gb, "Output/waterfowlTL_grassbirds.shp")
+
+#Produce a raster that only shows priority areas for grassland birds that are within waterfowl target landscapes
+gb.wf <- mask(gb.all, wf)
+plot(gb.wf)
+writeRaster(gb.wf, "Output/grassBirdsPA_inWaterfowlTL.tif")
+writeRaster(gb.all, "Output/grassBirdsPA_All.tif")
+
+
