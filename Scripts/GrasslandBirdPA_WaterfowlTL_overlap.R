@@ -22,7 +22,12 @@ gb.all.full <- any(gb, na.rm = T)
 #changes 0s to NA
 gb.all.full[gb.all.full == 0] <- NA
 #export
-writeRaster(gb.all.full, "Output/grassBirdsPA_All_full.tif")
+writeRaster(gb.all.full, "Output/grassBirdsPA_All_full.tif", overwrite = T)
+
+#sum the rasters to create a layer representing number of species that have priority habitat
+gb.sum.full <- sum(gb, na.rm = T)
+#export
+writeRaster(gb.sum.full, "Output/grassBirdsPA_sum_full.tif", overwrite = T)
 
 #The above shows too much habitat. Try just the Fab 4
 gb.fab4 <- gb[[names(gb) %in% c("BAIS", "CCLO", "SPPI", "TBLO")]]
@@ -38,7 +43,50 @@ wf <- read_sf("Data/Waterfowl_TL/TargetLandscapes_2026_Final.shp") |>
   st_transform(crs = crs(gb))
 
 #crop the grassland bird rasters to the waterfowl target landscapes
-gb <- crop(gb, wf)
+gb.sum.crop <- crop(gb.sum.full, wf, mask = T, touches = F)
+#export
+writeRaster(gb.sum.crop, "Output/grassBirdsPA_sum_wfTL.tif", overwrite = T)
+
+#calculate area of priority habitat for different numbers of species within waterfowl target landscapes
+area.by.nsp <- expanse(gb.sum.crop, unit = "m", byValue = T)
+names(area.by.nsp) <- c("layer", "n_species", "area_m2")
+area.by.nsp$area_acres <- area.by.nsp$area_m2 * 0.000247105381
+
+#total area for at least 1 species would be the sum of all. 
+area.tot <- sum(area.by.nsp$area_acres)
+
+#area for at least 7 species
+area.7 <- area.by.nsp |> 
+  filter(n_species > 6) |> 
+  pull(area_acres) |> 
+  sum()
+
+#percentage of waterfowl target landscapes
+area.perc <- sum(area.by.nsp$area_m2)/sum(st_area(wf))*100
+area.perc.7 <- (area.7/(sum(st_area(wf))*0.000247105381))*100
+
+#now try to demonstrate that a few specific target landscapes are made up almost entirely of high priorty habtiat for a large number of species
+# Pull every cell value plus its area for each polygon
+gb.species.by.TL <- extract(c(gb.sum.crop, cellSize(gb.sum.crop, unit = "m")),
+                wf, touches = FALSE)
+names(gb.species.by.TL) <- c("row", "n_species", "cell_m2")
+gb.species.by.TL$PHJV_Name <- wf$PHJV_Name[gb.species.by.TL$row]
+
+m2_to_acres <- 0.000247105381
+hi <- 7 #threshold for whats considered a high number of species
+
+TL.summary <- gb.species.by.TL |>
+  group_by(PHJV_Name) |>
+  summarise(
+    poly_acres     = sum(cell_m2) * m2_to_acres,
+    habitat_acres  = sum(cell_m2[!is.na(n_species)]) * m2_to_acres,
+    pct_habitat    = habitat_acres / poly_acres * 100,
+    mean_nsp       = weighted.mean(n_species, cell_m2, na.rm = TRUE),
+    pct_poly_high  = sum(cell_m2[n_species >= hi], na.rm = TRUE) / sum(cell_m2) * 100,
+    pct_habit_high = sum(cell_m2[n_species >= hi], na.rm = TRUE) /
+      sum(cell_m2[!is.na(n_species)]) * 100
+  ) |>
+  arrange(desc(pct_poly_high))
 
 #count number of pixels of priority habitat for each bird group in each target landscape polygon
 pixel.count <- exact_extract(gb, wf, fun = 'count')
